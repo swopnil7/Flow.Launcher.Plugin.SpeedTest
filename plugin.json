@@ -1,0 +1,12 @@
+{
+  "ID": "9E4A2B3C-5F6D-4E8A-9B1C-2D3E4F5A6B7C",
+  "ActionKeywords": ["st"],
+  "Name": "Speed Test",
+  "Description": "Test your internet connection speed",
+  "Author": "swopnil7",
+  "Version": "1.0.0",
+  "Language": "csharp",
+  "Website": "https://github.com/swopnil7/Flow.Launcher.Plugin.SpeedTest",
+  "IcoPath": "icon.png",
+  "ExecuteFileName": "Flow.Launcher.Plugin.SpeedTest.dll"
+}

@@ -1,0 +1,26 @@
+# Build artifacts
+bin/
+obj/
+publish/
+package/
+tmp_pkg/
+*.zip
+
+# Speedtest CLI
+cli/
+
+# Runtime files
+*.dll
+*.pdb
+*.deps.json
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
