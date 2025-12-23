@@ -1,0 +1,99 @@
+name: Publish Release
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - .github/workflows/*
+      - .gitignore
+      - idea/*
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Read version from plugin.json
+        id: version
+        uses: notiz-dev/github-action-json-property@v0.2.0
+        with:
+          path: plugin.json
+          prop_path: Version
+
+      - name: Fetch latest release version
+        id: latest
+        uses: reloc8/action-latest-release-version@1.0.0
+
+      - name: Check if release is required
+        id: check
+        shell: pwsh
+        run: |
+          $new = '${{ steps.version.outputs.prop }}'
+          $old = '${{ steps.latest.outputs.latest_version }}'.TrimStart('v')
+
+          if ($new -ne $old) {
+            "required=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "required=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Setup .NET
+        if: steps.check.outputs.required == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        if: steps.check.outputs.required == 'true'
+        shell: pwsh
+        run: |
+          dotnet restore Flow.Launcher.Plugin.SpeedTest.csproj --source https://api.nuget.org/v3/index.json
+
+      - name: Build
+        if: steps.check.outputs.required == 'true'
+        shell: pwsh
+        run: |
+          dotnet build Flow.Launcher.Plugin.SpeedTest.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Package plugin
+        if: steps.check.outputs.required == 'true'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.prop }}
+        run: |
+          $pluginName = "Flow.Launcher.Plugin.SpeedTest"
+          $rootFolder = "Speed Test-$env:VERSION"
+          $zipFile = "$pluginName-$env:VERSION.zip"
+
+          # Create root folder
+          New-Item -ItemType Directory $rootFolder | Out-Null
+
+          # Copy plugin files into root folder
+          Copy-Item ".\bin\Release\Flow.Launcher.Plugin.SpeedTest.dll" $rootFolder -Force
+          Copy-Item ".\plugin.json" $rootFolder -Force
+          Copy-Item ".\icon.png" $rootFolder -Force
+
+          # Compress the root folder itself (preserves folder inside zip)
+          Compress-Archive -Path $rootFolder -DestinationPath $zipFile -Force
+
+          # Clean up temporary folder
+          Remove-Item $rootFolder -Recurse -Force
+
+          Write-Host "Package created: $zipFile"
+
+      - name: Publish GitHub Release
+        if: steps.check.outputs.required == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.prop }}
+          files: Flow.Launcher.Plugin.SpeedTest-${{ steps.version.outputs.prop }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
