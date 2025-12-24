@@ -88,15 +88,22 @@ jobs:
         id: release_body
         shell: pwsh
         run: |
-          $body = Get-Content -Raw -Path "CHANGELOG.md"
-          echo "body<<EOH`n$body`nEOH" >> $GITHUB_OUTPUT
+          if (Test-Path CHANGELOG.md) {
+            $body = Get-Content -Raw -Path "CHANGELOG.md"
+            # Use a here-doc style write to GITHUB_OUTPUT to set a multiline output reliably
+            Write-Output "body<<'EOF'" >> $env:GITHUB_OUTPUT
+            Write-Output $body >> $env:GITHUB_OUTPUT
+            Write-Output "EOF" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Output "body=feat: dynamic icon switching based on application theme" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Publish GitHub Release
         if: steps.check.outputs.required == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.prop }}
-          name: "Speed Test v${{ steps.version.outputs.prop }}"
+          name: "${{ steps.version.outputs.prop }}"
           body: ${{ steps.release_body.outputs.body }}
           files: Flow.Launcher.Plugin.SpeedTest-${{ steps.version.outputs.prop }}.zip
         env:
