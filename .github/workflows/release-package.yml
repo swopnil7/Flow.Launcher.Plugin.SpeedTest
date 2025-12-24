@@ -1,5 +1,4 @@
 name: Publish Release
-
 on:
   push:
     branches: [ main ]
@@ -15,7 +14,6 @@ permissions:
 jobs:
   publish:
     runs-on: windows-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -37,7 +35,6 @@ jobs:
         run: |
           $new = '${{ steps.version.outputs.prop }}'
           $old = '${{ steps.latest.outputs.latest_version }}'.TrimStart('v')
-
           if ($new -ne $old) {
             "required=true" >> $env:GITHUB_OUTPUT
           } else {
@@ -72,28 +69,35 @@ jobs:
           $pluginName = "Flow.Launcher.Plugin.SpeedTest"
           $rootFolder = "Speed Test-$env:VERSION"
           $zipFile = "$pluginName-$env:VERSION.zip"
-
           # Create root folder
           New-Item -ItemType Directory $rootFolder | Out-Null
-
           # Copy plugin files into root folder
           Copy-Item ".\bin\Release\Flow.Launcher.Plugin.SpeedTest.dll" $rootFolder -Force
           Copy-Item ".\plugin.json" $rootFolder -Force
-          Copy-Item ".\icon.png" $rootFolder -Force
-
+          # Copy icon files (both light and dark versions)
+          Copy-Item ".\icon-light.png" $rootFolder -Force
+          Copy-Item ".\icon-dark.png" $rootFolder -Force
           # Compress the root folder itself (preserves folder inside zip)
           Compress-Archive -Path $rootFolder -DestinationPath $zipFile -Force
-
           # Clean up temporary folder
           Remove-Item $rootFolder -Recurse -Force
-
           Write-Host "Package created: $zipFile"
+
+      - name: Prepare release notes
+        if: steps.check.outputs.required == 'true'
+        id: release_body
+        shell: pwsh
+        run: |
+          $body = Get-Content -Raw -Path "CHANGELOG.md"
+          echo "body<<EOH`n$body`nEOH" >> $GITHUB_OUTPUT
 
       - name: Publish GitHub Release
         if: steps.check.outputs.required == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.prop }}
+          name: "Speed Test v${{ steps.version.outputs.prop }}"
+          body: ${{ steps.release_body.outputs.body }}
           files: Flow.Launcher.Plugin.SpeedTest-${{ steps.version.outputs.prop }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -31,7 +31,6 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Build ok" -ForegroundColor Green
 
-# create release package
 if ($Package) {
     $temp = ".\package"
     $rootName = "Speed Test-$Version"
@@ -45,9 +44,11 @@ if ($Package) {
     $packageRoot = Join-Path $temp $rootName
     New-Item -ItemType Directory -Path $packageRoot | Out-Null
 
-    Copy-Item ".\bin\Release\*.dll" $packageRoot -Force
+    $dllPath = Get-ChildItem ".\bin\Release" -Recurse -Filter "Flow.Launcher.Plugin.SpeedTest.dll" | Select-Object -First 1
+    Copy-Item $dllPath.FullName $packageRoot -Force
     Copy-Item ".\plugin.json" $packageRoot -Force
-    Copy-Item ".\icon.png" $packageRoot -Force
+    Copy-Item ".\icon-light.png" $packageRoot -Force
+    Copy-Item ".\icon-dark.png" $packageRoot -Force
     
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path "$temp\*" -DestinationPath $zip -Force
@@ -70,9 +71,11 @@ elseif ($Install) {
     }
     New-Item -ItemType Directory -Path $installPath -Force | Out-Null
     
-    Copy-Item ".\bin\Release\*.dll" $installPath -Force
+    $dllPath = Get-ChildItem ".\bin\Release" -Recurse -Filter "Flow.Launcher.Plugin.SpeedTest.dll" | Select-Object -First 1
+    Copy-Item $dllPath.FullName $installPath -Force
     Copy-Item ".\plugin.json" $installPath -Force
-    Copy-Item ".\icon.png" $installPath -Force
+    Copy-Item ".\icon-light.png" $installPath -Force
+    Copy-Item ".\icon-dark.png" $installPath -Force
     
     Write-Host "Installed to $installPath" -ForegroundColor Green
     Write-Host "Restart Flow Launcher" -ForegroundColor Cyan

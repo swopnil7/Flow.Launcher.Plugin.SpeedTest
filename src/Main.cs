@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 
 namespace Flow.Launcher.Plugin.SpeedTest
 {
@@ -22,13 +23,40 @@ namespace Flow.Launcher.Plugin.SpeedTest
         private Timer? _updateTimer;
         private string? _lastError;
         private DateTime _lastQueryTime;
+        private bool _isDarkTheme;
 
         public Task InitAsync(PluginInitContext context)
         {
             _context = context;
             _settings = context.API.LoadSettingJsonStorage<Settings>();
+
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher != null)
+            {
+                if (dispatcher.CheckAccess())
+                    _isDarkTheme = context.API.IsApplicationDarkTheme();
+                else
+                    dispatcher.Invoke(() => _isDarkTheme = context.API.IsApplicationDarkTheme());
+            }
+
+            context.API.ActualApplicationThemeChanged += (_, __) =>
+            {
+                var disp = Application.Current?.Dispatcher;
+                if (disp != null)
+                {
+                    if (disp.CheckAccess())
+                        _isDarkTheme = _context.API.IsApplicationDarkTheme();
+                    else
+                        disp.Invoke(() => _isDarkTheme = _context.API.IsApplicationDarkTheme());
+                    
+                    _context?.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword, true);
+                }
+            };
+
             return Task.CompletedTask;
         }
+
+        private string GetIcon() => _isDarkTheme ? "icon-dark.png" : "icon-light.png";
 
         public async Task<List<Result>> QueryAsync(Query query, CancellationToken token)
         {
@@ -51,8 +79,9 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 {
                     Title = "Testing your internet speed...",
                     SubTitle = "Connecting to nearest server...",
-                    IcoPath = "icon.png"
+                    IcoPath = GetIcon()
                 });
+
                 return results;
             }
 
@@ -62,7 +91,7 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 {
                     Title = _currentStatus ?? "Connecting to server...",
                     SubTitle = BuildProgressText(),
-                    IcoPath = "icon.png"
+                    IcoPath = GetIcon()
                 });
             }
             else if (_lastResult != null)
@@ -76,7 +105,7 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 {
                     Title = $"↓ {_lastResult.DownloadSpeed:F1} Mbps  ↑ {_lastResult.UploadSpeed:F1} Mbps",
                     SubTitle = $"Ping: {_lastResult.Ping:F0} ms • {_lastResult.ServerName} • {timeStr} • Enter to retest",
-                    IcoPath = "icon.png",
+                    IcoPath = GetIcon(),
                     Action = _ =>
                     {
                         _lastResult = null;
@@ -90,21 +119,21 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 {
                     Title = $"↓ Download: {_lastResult.DownloadSpeed:F2} Mbps",
                     SubTitle = $"Jitter: {_lastResult.DownloadJitter:F1} ms • Latency: {_lastResult.DownloadLatency:F1} ms",
-                    IcoPath = "icon.png"
+                    IcoPath = GetIcon()
                 });
 
                 results.Add(new Result
                 {
                     Title = $"↑ Upload: {_lastResult.UploadSpeed:F2} Mbps",
                     SubTitle = $"Jitter: {_lastResult.UploadJitter:F1} ms • Latency: {_lastResult.UploadLatency:F1} ms",
-                    IcoPath = "icon.png"
+                    IcoPath = GetIcon()
                 });
 
                 results.Add(new Result
                 {
                     Title = $"📍 {_lastResult.ServerName}",
                     SubTitle = $"{_lastResult.ServerLocation} • ISP: {_lastResult.ISP}",
-                    IcoPath = "icon.png"
+                    IcoPath = GetIcon()
                 });
 
                 if (!string.IsNullOrEmpty(_lastResult.ResultUrl))
@@ -113,7 +142,7 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     {
                         Title = "View detailed results online",
                         SubTitle = _lastResult.ResultUrl,
-                        IcoPath = "icon.png",
+                        IcoPath = GetIcon(),
                         Action = _ =>
                         {
                             Process.Start(new ProcessStartInfo(_lastResult.ResultUrl) { UseShellExecute = true });
@@ -128,7 +157,7 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 {
                     Title = "⚠️ Speed test failed",
                     SubTitle = _lastError + " • Enter to retry",
-                    IcoPath = "icon.png",
+                    IcoPath = GetIcon(),
                     Action = _ =>
                     {
                         _lastError = null;

@@ -1,0 +1,1 @@
+- Added dynamic icon switching based on Flow Launcher theme
