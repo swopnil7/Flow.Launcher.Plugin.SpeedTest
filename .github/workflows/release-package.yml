@@ -89,13 +89,13 @@ jobs:
         shell: pwsh
         run: |
           if (Test-Path CHANGELOG.md) {
-            $body = Get-Content -Raw -Path "CHANGELOG.md"
-            # Use a here-doc style write to GITHUB_OUTPUT to set a multiline output reliably
-            Write-Output "body<<'EOF'" >> $env:GITHUB_OUTPUT
-            Write-Output $body >> $env:GITHUB_OUTPUT
-            Write-Output "EOF" >> $env:GITHUB_OUTPUT
+              $body = Get-Content -Raw -Path "CHANGELOG.md"
+              # Proper way to write multiline output
+              Add-Content -Path $env:GITHUB_OUTPUT -Value "body<<EOH"
+              Add-Content -Path $env:GITHUB_OUTPUT -Value $body
+              Add-Content -Path $env:GITHUB_OUTPUT -Value "EOH"
           } else {
-            Write-Output "body=feat: dynamic icon switching based on application theme" >> $env:GITHUB_OUTPUT
+              Write-Output "body=feat: dynamic icon switching based on application theme" >> $env:GITHUB_OUTPUT
           }
 
       - name: Publish GitHub Release
