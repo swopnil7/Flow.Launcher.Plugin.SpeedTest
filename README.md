@@ -9,7 +9,7 @@ Test your internet speed from Flow Launcher using the Ookla Speedtest CLI.
 - Copy and paste the following command into Flow Launcher:
 
     ```bash
-    pm install "Speed Test by swopnil7"
+    pm install Speed Test by swopnil7
     ```
 
 **Or To Manually Install:**
