@@ -1,12 +1,14 @@
 ﻿param(
     [switch]$Install,
     [switch]$Package,
-    [string]$Version = "1.0.0"
+    [string]$Version
 )
 
 $name = "Flow.Launcher.Plugin.SpeedTest"
 $pluginsDir = "$env:APPDATA\FlowLauncher\Plugins"
-$installPath = "$pluginsDir\$name"
+
+$pj = Get-Content .\plugin.json -Raw | ConvertFrom-Json
+if ($pj.Version) { $Version = $pj.Version }
 
 if (-not $Install -and -not $Package) {
     Write-Host "`nBuild Options:" -ForegroundColor Cyan
@@ -59,24 +61,28 @@ if ($Package) {
 
 elseif ($Install) {
     Write-Host "Installing..." -ForegroundColor Yellow
-    
+
     $proc = Get-Process "Flow.Launcher" -ErrorAction SilentlyContinue
     if ($proc) {
         Stop-Process -Name "Flow.Launcher" -Force
         Start-Sleep 2
     }
-    
+
+    $rootName = "Speed Test-$Version"
+    # Install path uses versioned folder name to avoid overwriting other plugins
+    $installPath = Join-Path $pluginsDir $rootName
+
     if (Test-Path $installPath) {
         Remove-Item $installPath -Recurse -Force
     }
     New-Item -ItemType Directory -Path $installPath -Force | Out-Null
-    
+
     $dllPath = Get-ChildItem ".\bin\Release" -Recurse -Filter "Flow.Launcher.Plugin.SpeedTest.dll" | Select-Object -First 1
     Copy-Item $dllPath.FullName $installPath -Force
     Copy-Item ".\plugin.json" $installPath -Force
-    Copy-Item ".\icon-light.png" $installPath -Force
-    Copy-Item ".\icon-dark.png" $installPath -Force
-    
+    if (Test-Path ".\icon-light.png") { Copy-Item ".\icon-light.png" $installPath -Force }
+    if (Test-Path ".\icon-dark.png") { Copy-Item ".\icon-dark.png" $installPath -Force }
+
     Write-Host "Installed to $installPath" -ForegroundColor Green
     Write-Host "Restart Flow Launcher" -ForegroundColor Cyan
 }

@@ -67,20 +67,16 @@ jobs:
           VERSION: ${{ steps.version.outputs.prop }}
         run: |
           $pluginName = "Flow.Launcher.Plugin.SpeedTest"
-          $rootFolder = "Speed Test-$env:VERSION"
           $zipFile = "$pluginName-$env:VERSION.zip"
-          # Create root folder
-          New-Item -ItemType Directory $rootFolder | Out-Null
-          # Copy plugin files into root folder
-          Copy-Item ".\bin\Release\Flow.Launcher.Plugin.SpeedTest.dll" $rootFolder -Force
-          Copy-Item ".\plugin.json" $rootFolder -Force
-          # Copy icon files (both light and dark versions)
-          Copy-Item ".\icon-light.png" $rootFolder -Force
-          Copy-Item ".\icon-dark.png" $rootFolder -Force
-          # Compress the root folder itself (preserves folder inside zip)
-          Compress-Archive -Path $rootFolder -DestinationPath $zipFile -Force
-          # Clean up temporary folder
-          Remove-Item $rootFolder -Recurse -Force
+          $staging = "package-staging"
+          New-Item -ItemType Directory $staging | Out-Null
+          Copy-Item ".\bin\Release\Flow.Launcher.Plugin.SpeedTest.dll" $staging -Force
+          Copy-Item ".\plugin.json" $staging -Force
+          if (Test-Path ".\icon-light.png") { Copy-Item ".\icon-light.png" $staging -Force }
+          if (Test-Path ".\icon-dark.png") { Copy-Item ".\icon-dark.png" $staging -Force }
+          # Compress the staging folder contents so files are at zip root
+          Compress-Archive -Path "$staging\*" -DestinationPath $zipFile -Force
+          Remove-Item $staging -Recurse -Force
           Write-Host "Package created: $zipFile"
 
       - name: Prepare release notes
