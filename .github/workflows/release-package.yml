@@ -1,22 +1,23 @@
-name: Publish Release
+name: Release
+
 on:
   push:
     branches: [ main ]
-    paths-ignore:
-      - .github/workflows/*
-      - .gitignore
-      - idea/*
+    paths:
+      - 'plugin.json'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  publish:
+  release:
     runs-on: windows-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Read version from plugin.json
         id: version
@@ -25,43 +26,43 @@ jobs:
           path: plugin.json
           prop_path: Version
 
-      - name: Fetch latest release version
-        id: latest
-        uses: reloc8/action-latest-release-version@1.0.0
-
-      - name: Check if release is required
+      - name: Check if release exists
         id: check
         shell: pwsh
         run: |
-          $new = '${{ steps.version.outputs.prop }}'
-          $old = '${{ steps.latest.outputs.latest_version }}'.TrimStart('v')
-          if ($new -ne $old) {
-            "required=true" >> $env:GITHUB_OUTPUT
+          $version = '${{ steps.version.outputs.prop }}'
+          $tagName = "v$version"
+          
+          Write-Host "Version in plugin.json: $version"
+          Write-Host "Checking for tag: $tagName"
+          
+          git fetch --tags
+          $tagExists = git tag -l $tagName
+          
+          if ($tagExists) {
+            Write-Host "❌ Tag $tagName already exists - stopping workflow"
+            exit 1
           } else {
-            "required=false" >> $env:GITHUB_OUTPUT
+            Write-Host "✅ Tag $tagName does not exist - proceeding with release"
           }
 
       - name: Setup .NET
-        if: steps.check.outputs.required == 'true'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
       - name: Restore dependencies
-        if: steps.check.outputs.required == 'true'
         shell: pwsh
         run: |
           dotnet restore Flow.Launcher.Plugin.SpeedTest.csproj --source https://api.nuget.org/v3/index.json
 
       - name: Build
-        if: steps.check.outputs.required == 'true'
         shell: pwsh
         run: |
           dotnet build Flow.Launcher.Plugin.SpeedTest.csproj -c Release
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Package plugin
-        if: steps.check.outputs.required == 'true'
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.prop }}
@@ -69,37 +70,44 @@ jobs:
           $pluginName = "Flow.Launcher.Plugin.SpeedTest"
           $zipFile = "$pluginName-$env:VERSION.zip"
           $staging = "package-staging"
+          
           New-Item -ItemType Directory $staging | Out-Null
+          
           Copy-Item ".\bin\Release\Flow.Launcher.Plugin.SpeedTest.dll" $staging -Force
           Copy-Item ".\plugin.json" $staging -Force
-          if (Test-Path ".\icon-light.png") { Copy-Item ".\icon-light.png" $staging -Force }
-          if (Test-Path ".\icon-dark.png") { Copy-Item ".\icon-dark.png" $staging -Force }
-          # Compress the staging folder contents so files are at zip root
+          
+          if (Test-Path ".\icon-light.png") {
+            Copy-Item ".\icon-light.png" $staging -Force
+          }
+          if (Test-Path ".\icon-dark.png") {
+            Copy-Item ".\icon-dark.png" $staging -Force
+          }
+          
           Compress-Archive -Path "$staging\*" -DestinationPath $zipFile -Force
           Remove-Item $staging -Recurse -Force
-          Write-Host "Package created: $zipFile"
+          
+          Write-Host "✅ Package created: $zipFile"
 
       - name: Prepare release notes
-        if: steps.check.outputs.required == 'true'
         id: release_body
         shell: pwsh
         run: |
           if (Test-Path CHANGELOG.md) {
-              $body = Get-Content -Raw -Path "CHANGELOG.md"
-              # Proper way to write multiline output
-              Add-Content -Path $env:GITHUB_OUTPUT -Value "body<<EOH"
-              Add-Content -Path $env:GITHUB_OUTPUT -Value $body
-              Add-Content -Path $env:GITHUB_OUTPUT -Value "EOH"
+            $body = Get-Content -Raw -Path "CHANGELOG.md"
           } else {
-              Write-Output "body=feat: dynamic icon switching based on application theme" >> $env:GITHUB_OUTPUT
+            $body = "Release version ${{ steps.version.outputs.prop }}"
           }
+          
+          $delimiter = "EOF_$(Get-Random)"
+          "body<<$delimiter" >> $env:GITHUB_OUTPUT
+          $body >> $env:GITHUB_OUTPUT
+          $delimiter >> $env:GITHUB_OUTPUT
 
       - name: Publish GitHub Release
-        if: steps.check.outputs.required == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.prop }}
-          name: "${{ steps.version.outputs.prop }}"
+          name: "v${{ steps.version.outputs.prop }}"
           body: ${{ steps.release_body.outputs.body }}
           files: Flow.Launcher.Plugin.SpeedTest-${{ steps.version.outputs.prop }}.zip
         env:
