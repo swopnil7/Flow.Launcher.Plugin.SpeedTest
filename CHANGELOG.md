@@ -1,1 +1,1 @@
-- Added dynamic icon switching based on Flow Launcher theme
+- Fixed auto invocation on change of theme

@@ -48,8 +48,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                         _isDarkTheme = _context.API.IsApplicationDarkTheme();
                     else
                         disp.Invoke(() => _isDarkTheme = _context.API.IsApplicationDarkTheme());
-                    
-                    _context?.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword, true);
                 }
             };
 
