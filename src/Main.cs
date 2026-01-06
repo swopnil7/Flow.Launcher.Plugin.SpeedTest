@@ -69,7 +69,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
 
             if (string.IsNullOrWhiteSpace(q))
             {
-                // don't auto-run tests: show usage and last result
                 if (_lastResult != null)
                 {
                     var timeSince = DateTime.Now - _lastTestTime;
@@ -94,7 +93,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 return results;
             }
 
-            // command handling
             var cmd = q.ToLowerInvariant();
             if (cmd == "start")
             {
@@ -104,7 +102,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     _currentStatus = "Connecting to server...";
                     RunTest();
                     
-                    // Set up auto-refresh timer to update progress
                     _refreshTimer?.Dispose();
                     _refreshTimer = new Timer(_ =>
                     {
@@ -112,7 +109,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                         {
                             try
                             {
-                                // Trigger refresh by changing query to current query
                                 _context.API.ChangeQuery(_currentQuery, true);
                             }
                             catch { }
@@ -122,7 +118,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     results.Add(new Result { Title = "Testing your internet speed...", SubTitle = "Connecting to nearest server...", IcoPath = GetIcon() });
                     return results;
                 }
-                // if test is running, fall through to show progress
             }
 
             if (cmd == "history")
@@ -134,7 +129,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     return results;
                 }
 
-                // show all history entries
                 foreach (var entry in hist.AsReadOnly().Reverse())
                 {
                     results.Add(new Result
@@ -306,7 +300,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     _lastTestTime = DateTime.Now;
                     _lastError = null;
 
-                    // record history with IPs from speedtest result
                     var entry = new HistoryEntry
                     {
                         Time = DateTime.Now,
@@ -314,14 +307,11 @@ namespace Flow.Launcher.Plugin.SpeedTest
                         UploadSpeed = result?.UploadSpeed ?? 0,
                         Ping = result?.Ping ?? 0,
                         ServerName = result?.ServerName ?? string.Empty,
-                        ResultUrl = result?.ResultUrl ?? string.Empty,
-                        InternalIP = result?.InternalIP ?? "unknown",
-                        ExternalIP = result?.ExternalIP ?? "unknown"
+                        ResultUrl = result?.ResultUrl ?? string.Empty
                     };
 
                     _settings ??= new Settings();
                     _settings.History.Add(entry);
-                    // keep only the last N entries
                     var max = _settings.MaxHistoryEntries > 0 ? _settings.MaxHistoryEntries : 20;
                     if (_settings.History.Count > max)
                         _settings.History.RemoveRange(0, _settings.History.Count - max);
@@ -341,7 +331,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     _refreshTimer?.Dispose();
                     _refreshTimer = null;
                     
-                    // Trigger final refresh to show full detailed results
                     if (_context != null)
                     {
                         await Task.Delay(100);
