@@ -42,8 +42,7 @@ This plugin uses the Ookla Speedtest CLI to run network tests. Thanks to Ookla f
 
 ## Contributing 🤝
 
-- To build and test locally: `dotnet build -c Release` and `.
-\build.ps1 -Install` (installs to your local Flow Launcher plugin path).
+- To build and test locally: `.\build.ps1 -Install` (installs to your local Flow Launcher plugin path).
 - Pull requests, issues, and improvements are welcome — please follow standard GitHub flow.
 
 ---

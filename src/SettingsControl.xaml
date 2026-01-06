@@ -1,0 +1,20 @@
+<UserControl x:Class="Flow.Launcher.Plugin.SpeedTest.SettingsControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             mc:Ignorable="d" 
+             d:DesignHeight="80" d:DesignWidth="400">
+    <StackPanel Margin="10">
+        <Grid Margin="0,5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            
+            <TextBlock Text="&#x9;Maximum history entries:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBox Grid.Column="1" x:Name="MaxHistoryTextBox" Width="100" HorizontalAlignment="Left" 
+                     TextChanged="MaxHistoryTextBox_TextChanged"/>
+        </Grid>
+    </StackPanel>
+</UserControl>

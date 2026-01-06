@@ -1,1 +1,1 @@
-- Fixed auto invocation on change of theme
+- Added Past Test History and IP Lookup

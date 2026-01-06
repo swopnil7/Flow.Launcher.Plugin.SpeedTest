@@ -2,13 +2,14 @@ using Flow.Launcher.Plugin;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 
 namespace Flow.Launcher.Plugin.SpeedTest
 {
-    public class Main : IAsyncPlugin, IPluginI18n
+    public class Main : IAsyncPlugin, IPluginI18n, ISettingProvider
     {
         private PluginInitContext? _context;
         private Settings? _settings;
@@ -20,38 +21,34 @@ namespace Flow.Launcher.Plugin.SpeedTest
         private double _uploadProgress;
         private double _currentDownloadSpeed;
         private double _currentUploadSpeed;
-        private Timer? _updateTimer;
         private string? _lastError;
         private DateTime _lastQueryTime;
         private bool _isDarkTheme;
+        private string _currentQuery = string.Empty;
+        private Timer? _refreshTimer;
 
         public Task InitAsync(PluginInitContext context)
         {
             _context = context;
             _settings = context.API.LoadSettingJsonStorage<Settings>();
 
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher != null)
-            {
-                if (dispatcher.CheckAccess())
-                    _isDarkTheme = context.API.IsApplicationDarkTheme();
-                else
-                    dispatcher.Invoke(() => _isDarkTheme = context.API.IsApplicationDarkTheme());
-            }
-
+            UpdateIcon();
             context.API.ActualApplicationThemeChanged += (_, __) =>
             {
-                var disp = Application.Current?.Dispatcher;
-                if (disp != null)
-                {
-                    if (disp.CheckAccess())
-                        _isDarkTheme = _context.API.IsApplicationDarkTheme();
-                    else
-                        disp.Invoke(() => _isDarkTheme = _context.API.IsApplicationDarkTheme());
-                }
+                UpdateIcon();
+                try { _context?.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword, true); } catch { }
             };
 
             return Task.CompletedTask;
+        }
+
+        private void UpdateIcon()
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher?.CheckAccess() == true)
+                _isDarkTheme = _context.API.IsApplicationDarkTheme();
+            else
+                dispatcher?.Invoke(() => _isDarkTheme = _context.API.IsApplicationDarkTheme());
         }
 
         private string GetIcon() => _isDarkTheme ? "icon-dark.png" : "icon-light.png";
@@ -68,18 +65,116 @@ namespace Flow.Launcher.Plugin.SpeedTest
             }
             _lastQueryTime = DateTime.Now;
 
-            if (string.IsNullOrWhiteSpace(query.Search) && !_isTestRunning && _lastResult == null && _lastError == null)
+            var q = (query.Search ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(q))
             {
-                _currentStatus = "Connecting to server...";
-                RunTest();
-
-                results.Add(new Result
+                // don't auto-run tests: show usage and last result
+                if (_lastResult != null)
                 {
-                    Title = "Testing your internet speed...",
-                    SubTitle = "Connecting to nearest server...",
-                    IcoPath = GetIcon()
-                });
+                    var timeSince = DateTime.Now - _lastTestTime;
+                    var timeStr = timeSince.TotalMinutes < 60 ? $"{(int)timeSince.TotalMinutes}m ago" : $"{(int)timeSince.TotalHours}h ago";
+                    results.Add(new Result
+                    {
+                        Title = $"↓ {_lastResult.DownloadSpeed:F1} Mbps  ↑ {_lastResult.UploadSpeed:F1} Mbps",
+                        SubTitle = $"{timeStr} • start • history • ip",
+                        IcoPath = GetIcon()
+                    });
+                }
+                else
+                {
+                    results.Add(new Result
+                    {
+                        Title = "Type start to test your speed",
+                        SubTitle = "start • history • ip",
+                        IcoPath = GetIcon()
+                    });
+                }
 
+                return results;
+            }
+
+            // command handling
+            var cmd = q.ToLowerInvariant();
+            if (cmd == "start")
+            {
+                if (!_isTestRunning)
+                {
+                    _currentQuery = query.RawQuery;
+                    _currentStatus = "Connecting to server...";
+                    RunTest();
+                    
+                    // Set up auto-refresh timer to update progress
+                    _refreshTimer?.Dispose();
+                    _refreshTimer = new Timer(_ =>
+                    {
+                        if (_isTestRunning && _context != null)
+                        {
+                            try
+                            {
+                                // Trigger refresh by changing query to current query
+                                _context.API.ChangeQuery(_currentQuery, true);
+                            }
+                            catch { }
+                        }
+                    }, null, 300, 300);
+                    
+                    results.Add(new Result { Title = "Testing your internet speed...", SubTitle = "Connecting to nearest server...", IcoPath = GetIcon() });
+                    return results;
+                }
+                // if test is running, fall through to show progress
+            }
+
+            if (cmd == "history")
+            {
+                var hist = _settings?.History ?? new List<HistoryEntry>();
+                if (hist.Count == 0)
+                {
+                    results.Add(new Result { Title = "No history", SubTitle = "No previous tests recorded", IcoPath = GetIcon() });
+                    return results;
+                }
+
+                // show all history entries
+                foreach (var entry in hist.AsReadOnly().Reverse())
+                {
+                    results.Add(new Result
+                    {
+                        Title = $"↓ {entry.DownloadSpeed:F1} Mbps  ↑ {entry.UploadSpeed:F1} Mbps",
+                        SubTitle = $"{entry.Time:g} • Ping: {entry.Ping:F0} ms",
+                        IcoPath = GetIcon()
+                    });
+                }
+
+                return results;
+            }
+
+            if (cmd == "ip")
+            {
+                var internalIp = await GetInternalIpAsync();
+                results.Add(new Result 
+                { 
+                    Title = "Internal IP", 
+                    SubTitle = $"{internalIp} • Press Enter to copy",
+                    IcoPath = GetIcon(),
+                    Action = _ =>
+                    {
+                        try { System.Windows.Clipboard.SetText(internalIp); } catch { }
+                        return true;
+                    }
+                });
+                
+                var externalIp = await GetExternalIpAsync();
+                results.Add(new Result 
+                { 
+                    Title = "External IP", 
+                    SubTitle = $"{externalIp} • Press Enter to copy",
+                    IcoPath = GetIcon(),
+                    Action = _ =>
+                    {
+                        try { System.Windows.Clipboard.SetText(externalIp); } catch { }
+                        return true;
+                    }
+                });
                 return results;
             }
 
@@ -94,21 +189,16 @@ namespace Flow.Launcher.Plugin.SpeedTest
             }
             else if (_lastResult != null)
             {
-                var timeSince = DateTime.Now - _lastTestTime;
-                var timeStr = timeSince.TotalMinutes < 60
-                    ? $"{(int)timeSince.TotalMinutes}m ago"
-                    : $"{(int)timeSince.TotalHours}h ago";
-
                 results.Add(new Result
                 {
                     Title = $"↓ {_lastResult.DownloadSpeed:F1} Mbps  ↑ {_lastResult.UploadSpeed:F1} Mbps",
-                    SubTitle = $"Ping: {_lastResult.Ping:F0} ms • {_lastResult.ServerName} • {timeStr} • Enter to retest",
+                    SubTitle = $"Ping: {_lastResult.Ping:F0} ms • {_lastResult.ServerName} • Enter to retest",
                     IcoPath = GetIcon(),
                     Action = _ =>
                     {
                         _lastResult = null;
                         _lastError = null;
-                        RunTest();
+                        _context?.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword + " start", true);
                         return false;
                     }
                 });
@@ -196,18 +286,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     _currentDownloadSpeed = 0;
                     _currentUploadSpeed = 0;
 
-                    _updateTimer = new Timer(_ =>
-                    {
-                        if (_isTestRunning && _context != null)
-                        {
-                            try
-                            {
-                                _context.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword + " ", true);
-                            }
-                            catch { }
-                        }
-                    }, null, 300, 300);
-
                     var cliPath = await SpeedTestCLI.DownloadIfMissing(_context!);
 
                     var result = await SpeedTestCLI.Run(
@@ -227,6 +305,29 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     _lastResult = result;
                     _lastTestTime = DateTime.Now;
                     _lastError = null;
+
+                    // record history with IPs from speedtest result
+                    var entry = new HistoryEntry
+                    {
+                        Time = DateTime.Now,
+                        DownloadSpeed = result?.DownloadSpeed ?? 0,
+                        UploadSpeed = result?.UploadSpeed ?? 0,
+                        Ping = result?.Ping ?? 0,
+                        ServerName = result?.ServerName ?? string.Empty,
+                        ResultUrl = result?.ResultUrl ?? string.Empty,
+                        InternalIP = result?.InternalIP ?? "unknown",
+                        ExternalIP = result?.ExternalIP ?? "unknown"
+                    };
+
+                    _settings ??= new Settings();
+                    _settings.History.Add(entry);
+                    // keep only the last N entries
+                    var max = _settings.MaxHistoryEntries > 0 ? _settings.MaxHistoryEntries : 20;
+                    if (_settings.History.Count > max)
+                        _settings.History.RemoveRange(0, _settings.History.Count - max);
+
+                    try { _context?.API.SaveSettingJsonStorage<Settings>(); } catch { }
+
                 }
                 catch (Exception ex)
                 {
@@ -237,15 +338,16 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 finally
                 {
                     _isTestRunning = false;
-                    _updateTimer?.Dispose();
-                    _updateTimer = null;
-
-                    await Task.Delay(50);
+                    _refreshTimer?.Dispose();
+                    _refreshTimer = null;
+                    
+                    // Trigger final refresh to show full detailed results
                     if (_context != null)
                     {
+                        await Task.Delay(100);
                         try
                         {
-                            _context.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword, false);
+                            _context.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword + " result", true);
                         }
                         catch { }
                     }
@@ -253,9 +355,57 @@ namespace Flow.Launcher.Plugin.SpeedTest
             });
         }
 
+        private async Task<string> GetExternalIpAsync()
+        {
+            try
+            {
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                return (await http.GetStringAsync("https://api.ipify.org")).Trim();
+            }
+            catch { return "unknown"; }
+        }
+
+        private Task<string> GetInternalIpAsync()
+        {
+            try
+            {
+                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(ip))
+                        return Task.FromResult(ip.ToString());
+                }
+                return Task.FromResult("unknown");
+            }
+            catch
+            {
+                return Task.FromResult("unknown");
+            }
+        }
+
         public string GetTranslatedPluginTitle() => "Speed Test";
         public string GetTranslatedPluginDescription() => "Test your internet connection speed";
+
+        public System.Windows.Controls.Control CreateSettingPanel()
+        {
+            return new SettingsControl(_context!);
+        }
     }
 
-    public class Settings { }
+    public class Settings {
+        public List<HistoryEntry> History { get; set; } = new List<HistoryEntry>();
+        public int MaxHistoryEntries { get; set; } = 20;
+    }
+
+    public class HistoryEntry
+    {
+        public DateTime Time { get; set; }
+        public double DownloadSpeed { get; set; }
+        public double UploadSpeed { get; set; }
+        public double Ping { get; set; }
+        public string ServerName { get; set; } = "";
+        public string ResultUrl { get; set; } = "";
+        public string InternalIP { get; set; } = "";
+        public string ExternalIP { get; set; } = "";
+    }
 }

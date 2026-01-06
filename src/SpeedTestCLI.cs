@@ -130,7 +130,9 @@ namespace Flow.Launcher.Plugin.SpeedTest
                             ServerName = json.Server?.Name ?? "Unknown",
                             ServerLocation = json.Server?.Location ?? "",
                             ISP = json.Isp ?? "",
-                            ResultUrl = json.Result?.Url ?? ""
+                            ResultUrl = json.Result?.Url ?? "",
+                            ExternalIP = json.Interface?.ExternalIp ?? "unknown",
+                            InternalIP = json.Interface?.InternalIp ?? "unknown"
                         };
                     }
                 }
@@ -186,6 +188,8 @@ namespace Flow.Launcher.Plugin.SpeedTest
         public string ServerLocation { get; set; } = "";
         public string ISP { get; set; } = "";
         public string ResultUrl { get; set; } = "";
+        public string ExternalIP { get; set; } = "";
+        public string InternalIP { get; set; } = "";
     }
 
     public class SpeedTestJsonResponse
@@ -210,6 +214,9 @@ namespace Flow.Launcher.Plugin.SpeedTest
 
         [JsonPropertyName("isp")]
         public string? Isp { get; set; }
+
+        [JsonPropertyName("interface")]
+        public InterfaceInfo? Interface { get; set; }
     }
 
     public class PingInfo
@@ -252,5 +259,14 @@ namespace Flow.Launcher.Plugin.SpeedTest
     {
         [JsonPropertyName("url")]
         public string? Url { get; set; }
+    }
+
+    public class InterfaceInfo
+    {
+        [JsonPropertyName("externalIp")]
+        public string? ExternalIp { get; set; }
+
+        [JsonPropertyName("internalIp")]
+        public string? InternalIp { get; set; }
     }
 }
