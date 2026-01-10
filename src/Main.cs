@@ -26,6 +26,8 @@ namespace Flow.Launcher.Plugin.SpeedTest
         private bool _isDarkTheme;
         private string _currentQuery = string.Empty;
         private Timer? _refreshTimer;
+        private Process? _runningProcess;
+        private bool _userCancelled;
 
         public Task InitAsync(PluginInitContext context)
         {
@@ -66,6 +68,23 @@ namespace Flow.Launcher.Plugin.SpeedTest
             _lastQueryTime = DateTime.Now;
 
             var q = (query.Search ?? string.Empty).Trim();
+
+            if (_isTestRunning && _currentQuery != query.RawQuery)
+            {
+                _userCancelled = true;
+                try
+                {
+                    _runningProcess?.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    try { _runningProcess?.Kill(); } catch { }
+                }
+                _runningProcess = null;
+                _refreshTimer?.Dispose();
+                _refreshTimer = null;
+                _currentStatus = "User Cancelled";
+            }
 
             if (string.IsNullOrWhiteSpace(q))
             {
@@ -284,7 +303,11 @@ namespace Flow.Launcher.Plugin.SpeedTest
 
                     var result = await SpeedTestCLI.Run(
                         cliPath,
-                        _ => { },
+                        proc =>
+                        {
+                            _runningProcess = proc;
+                            try { proc.EnableRaisingEvents = true; proc.Exited += (_, __) => _runningProcess = null; } catch { }
+                        },
                         (status, download, upload, downloadSpeed, uploadSpeed) =>
                         {
                             _currentStatus = status;
@@ -321,17 +344,28 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 }
                 catch (Exception ex)
                 {
-                    _lastError = ex.Message;
-                    _currentStatus = null;
-                    _context?.API.LogException("SpeedTest", "Test failed", ex);
+                    if (_userCancelled)
+                    {
+                        _lastError = null;
+                        _currentStatus = "User Cancelled";
+                    }
+                    else
+                    {
+                        _lastError = ex.Message;
+                        _currentStatus = null;
+                        _context?.API.LogException("SpeedTest", "Test failed", ex);
+                    }
                 }
                 finally
                 {
                     _isTestRunning = false;
+                    var wasCancelled = _userCancelled;
+                    _userCancelled = false;
+                    _runningProcess = null;
                     _refreshTimer?.Dispose();
                     _refreshTimer = null;
                     
-                    if (_context != null)
+                    if (!wasCancelled && _context != null)
                     {
                         await Task.Delay(100);
                         try

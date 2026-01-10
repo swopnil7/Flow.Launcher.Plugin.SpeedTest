@@ -1,1 +1,1 @@
-- Added Past Test History and IP Lookup
+- Allow cancellation of test by clearing/modifying the query
