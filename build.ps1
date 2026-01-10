@@ -64,12 +64,12 @@ elseif ($Install) {
 
     $proc = Get-Process "Flow.Launcher" -ErrorAction SilentlyContinue
     if ($proc) {
+        Write-Host "Stopping Flow Launcher..." -ForegroundColor Yellow
         Stop-Process -Name "Flow.Launcher" -Force
         Start-Sleep 2
     }
 
     $rootName = "Speed Test-$Version"
-    # Install path uses versioned folder name to avoid overwriting other plugins
     $installPath = Join-Path $pluginsDir $rootName
 
     if (Test-Path $installPath) {
@@ -84,5 +84,14 @@ elseif ($Install) {
     if (Test-Path ".\icon-dark.png") { Copy-Item ".\icon-dark.png" $installPath -Force }
 
     Write-Host "Installed to $installPath" -ForegroundColor Green
-    Write-Host "Restart Flow Launcher" -ForegroundColor Cyan
+    
+    $flowPath = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
+    if (Test-Path $flowPath) {
+        Write-Host "Starting Flow Launcher..." -ForegroundColor Yellow
+        Start-Process $flowPath
+        Write-Host "Flow Launcher started" -ForegroundColor Green
+    } else {
+        Write-Host "Flow Launcher executable not found at $flowPath" -ForegroundColor Yellow
+        Write-Host "Please start Flow Launcher manually" -ForegroundColor Cyan
+    }
 }
