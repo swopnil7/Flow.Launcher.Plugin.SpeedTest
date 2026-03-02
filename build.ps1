@@ -62,19 +62,20 @@ if ($Package) {
 elseif ($Install) {
     Write-Host "Installing..." -ForegroundColor Yellow
 
-    $proc = Get-Process "Flow.Launcher" -ErrorAction SilentlyContinue
-    if ($proc) {
-        Write-Host "Stopping Flow Launcher..." -ForegroundColor Yellow
-        Stop-Process -Name "Flow.Launcher" -Force
-        Start-Sleep 2
+    $flowProc = Get-Process "Flow.Launcher" -ErrorAction SilentlyContinue
+    if ($flowProc) {
+        Write-Host "Stopping Flow Launcher (PID: $($flowProc.Id))..." -ForegroundColor Yellow
+        taskkill /PID $flowProc.Id /F /T 2>&1 | Out-Null
+        Start-Sleep 3
     }
 
     $rootName = "Speed Test-$Version"
     $installPath = Join-Path $pluginsDir $rootName
 
     if (Test-Path $installPath) {
-        Remove-Item $installPath -Recurse -Force
+        Remove-Item $installPath -Recurse -Force -ErrorAction SilentlyContinue
     }
+    
     New-Item -ItemType Directory -Path $installPath -Force | Out-Null
 
     $dllPath = Get-ChildItem ".\bin\Release" -Recurse -Filter "Flow.Launcher.Plugin.SpeedTest.dll" | Select-Object -First 1
