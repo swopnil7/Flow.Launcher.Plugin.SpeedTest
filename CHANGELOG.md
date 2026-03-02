@@ -1,1 +1,2 @@
-- Allow cancellation of test by clearing/modifying the query
+- Fixes #2
+- Improved build script
