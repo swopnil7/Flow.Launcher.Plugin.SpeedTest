@@ -38,7 +38,6 @@ namespace Flow.Launcher.Plugin.SpeedTest
             context.API.ActualApplicationThemeChanged += (_, __) =>
             {
                 UpdateIcon();
-                try { _context?.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword, true); } catch { }
             };
 
             return Task.CompletedTask;
