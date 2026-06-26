@@ -15,7 +15,7 @@ Test your internet speed from Flow Launcher using the Ookla Speedtest CLI.
 **Or To Manually Install:**
 
 1. Download the latest release from [GitHub Releases](https://github.com/swopnil7/Flow.Launcher.Plugin.SpeedTest/releases).
-2. Extract the ZIP file — it contains a single folder named `Speed Test-<version>`.
+2. Extract the ZIP file into a folder and rename the folder to `Speed Test-<version>`.
 3. Copy the `Speed Test-<version>` folder into `%APPDATA%\FlowLauncher\Plugins`.
 4. Restart Flow Launcher to load the plugin.
 
