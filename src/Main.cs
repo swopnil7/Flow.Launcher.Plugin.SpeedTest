@@ -28,6 +28,11 @@ namespace Flow.Launcher.Plugin.SpeedTest
         private Timer? _refreshTimer;
         private Process? _runningProcess;
         private bool _userCancelled;
+        private List<ServerListEntry>? _cachedServers;
+        private DateTime _serversFetchedAt = DateTime.MinValue;
+        private bool _isFetchingServers;
+        private string? _serversError;
+        private static readonly TimeSpan ServerCacheLifetime = TimeSpan.FromMinutes(30);
 
         public Task InitAsync(PluginInitContext context)
         {
@@ -94,7 +99,7 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     results.Add(new Result
                     {
                         Title = $"↓ {_lastResult.DownloadSpeed:F1} Mbps  ↑ {_lastResult.UploadSpeed:F1} Mbps",
-                        SubTitle = $"{timeStr} • start • history • ip",
+                        SubTitle = $"{timeStr} • start • history • ip • server",
                         IcoPath = GetIcon()
                     });
                 }
@@ -103,7 +108,7 @@ namespace Flow.Launcher.Plugin.SpeedTest
                     results.Add(new Result
                     {
                         Title = "Type start to test your speed",
-                        SubTitle = "start • history • ip",
+                        SubTitle = "start • history • ip • server",
                         IcoPath = GetIcon()
                     });
                 }
@@ -190,6 +195,12 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 return results;
             }
 
+            if (cmd == "server" || cmd.StartsWith("server "))
+            {
+                var filter = q.Length > 6 ? q.Substring(6).Trim() : string.Empty;
+                return BuildServerResults(filter);
+            }
+
             if (_isTestRunning)
             {
                 results.Add(new Result
@@ -232,7 +243,9 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 results.Add(new Result
                 {
                     Title = $"📍 {_lastResult.ServerName}",
-                    SubTitle = $"{_lastResult.ServerLocation} • ISP: {_lastResult.ISP}",
+                    SubTitle = _lastResult.UsedFallbackServer
+                        ? $"{_lastResult.ServerLocation} • ISP: {_lastResult.ISP} • ⚠️ default server was unavailable, used nearest instead"
+                        : $"{_lastResult.ServerLocation} • ISP: {_lastResult.ISP}",
                     IcoPath = GetIcon()
                 });
 
@@ -279,6 +292,139 @@ namespace Flow.Launcher.Plugin.SpeedTest
             return "Finding best server...";
         }
 
+        private List<Result> BuildServerResults(string filter)
+        {
+            var results = new List<Result>();
+
+            var cacheStale = _cachedServers == null || (DateTime.Now - _serversFetchedAt) > ServerCacheLifetime;
+
+            if (cacheStale && !_isFetchingServers)
+            {
+                _isFetchingServers = true;
+                _serversError = null;
+                var requeryFilter = filter;
+
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        var cliPath = await SpeedTestCLI.DownloadIfMissing(_context!);
+                        var servers = await SpeedTestCLI.GetServers(cliPath, _context!, CancellationToken.None);
+                        _cachedServers = servers;
+                        _serversFetchedAt = DateTime.Now;
+                        _serversError = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        _serversError = ex.Message;
+                        _context?.API.LogException("SpeedTest", "Failed to fetch server list", ex);
+                    }
+                    finally
+                    {
+                        _isFetchingServers = false;
+                        try
+                        {
+                            var keyword = _context?.CurrentPluginMetadata.ActionKeyword ?? "";
+                            var query = string.IsNullOrEmpty(requeryFilter) ? $"{keyword} server" : $"{keyword} server {requeryFilter}";
+                            _context?.API.ChangeQuery(query, true);
+                        }
+                        catch { }
+                    }
+                });
+            }
+
+            if (_cachedServers == null)
+            {
+                if (_isFetchingServers)
+                {
+                    results.Add(new Result { Title = "Fetching nearby servers...", SubTitle = "This may take a few seconds", IcoPath = GetIcon() });
+                }
+                else
+                {
+                    results.Add(new Result
+                    {
+                        Title = "⚠️ Could not load server list",
+                        SubTitle = (_serversError ?? "Unknown error") + " • Enter to retry",
+                        IcoPath = GetIcon(),
+                        Action = _ =>
+                        {
+                            _serversError = null;
+                            var keyword = _context?.CurrentPluginMetadata.ActionKeyword ?? "";
+                            _context?.API.ChangeQuery($"{keyword} server", true);
+                            return false;
+                        }
+                    });
+                }
+                return results;
+            }
+
+            var currentDefaultId = _settings?.DefaultServerId ?? 0;
+
+            if (string.IsNullOrEmpty(filter) || "auto".Contains(filter, StringComparison.OrdinalIgnoreCase))
+            {
+                var autoSelected = currentDefaultId == 0;
+                results.Add(new Result
+                {
+                    Title = (autoSelected ? "• " : "") + "Auto (nearest server)",
+                    SubTitle = autoSelected
+                        ? "Automatically picks the best server • Currently active"
+                        : "Automatically picks the best server • Press Enter to set as default",
+                    IcoPath = GetIcon(),
+                    Action = _ =>
+                    {
+                        SetDefaultServer(0, string.Empty);
+                        return false;
+                    }
+                });
+            }
+
+            IEnumerable<ServerListEntry> list = _cachedServers;
+            if (!string.IsNullOrEmpty(filter))
+                list = list.Where(s => s.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
+
+            foreach (var server in list.Take(10))
+            {
+                var selected = currentDefaultId == server.Id;
+                var captured = server;
+                results.Add(new Result
+                {
+                    Title = (selected ? "• " : "") + captured.Name,
+                    SubTitle = selected
+                        ? $"id: {captured.Id} • Currently active"
+                        : $"id: {captured.Id} • Press Enter to set as default",
+                    IcoPath = GetIcon(),
+                    Action = _ =>
+                    {
+                        SetDefaultServer(captured.Id, captured.Name);
+                        return false;
+                    }
+                });
+            }
+
+            if (results.Count == 0)
+            {
+                results.Add(new Result { Title = "No matching servers", SubTitle = "Try a different search term, or type \"server\" to see all", IcoPath = GetIcon() });
+            }
+
+            return results;
+        }
+
+        private void SetDefaultServer(int id, string name)
+        {
+            _settings ??= new Settings();
+            _settings.DefaultServerId = id;
+            _settings.DefaultServerName = name;
+            try { _context?.API.SaveSettingJsonStorage<Settings>(); } catch { }
+
+            try
+            {
+                _context?.API.ShowMsg(id == 0 ? "Default server set to Auto" : $"Default server set to {name}");
+                var keyword = _context?.CurrentPluginMetadata.ActionKeyword ?? "";
+                _context?.API.ChangeQuery(keyword + " ", true);
+            }
+            catch { }
+        }
+
         private void RunTest()
         {
             if (_isTestRunning)
@@ -300,23 +446,43 @@ namespace Flow.Launcher.Plugin.SpeedTest
 
                     var cliPath = await SpeedTestCLI.DownloadIfMissing(_context!);
 
-                    var result = await SpeedTestCLI.Run(
-                        cliPath,
-                        proc =>
-                        {
-                            _runningProcess = proc;
-                            try { proc.EnableRaisingEvents = true; proc.Exited += (_, __) => _runningProcess = null; } catch { }
-                        },
-                        (status, download, upload, downloadSpeed, uploadSpeed) =>
-                        {
-                            _currentStatus = status;
-                            _downloadProgress = download;
-                            _uploadProgress = upload;
-                            _currentDownloadSpeed = downloadSpeed;
-                            _currentUploadSpeed = uploadSpeed;
-                        },
-                        _context!
-                    );
+                    void ProcessCallback(Process proc)
+                    {
+                        _runningProcess = proc;
+                        try { proc.EnableRaisingEvents = true; proc.Exited += (_, __) => _runningProcess = null; } catch { }
+                    }
+
+                    void ProgressCallback(string status, double download, double upload, double downloadSpeed, double uploadSpeed)
+                    {
+                        _currentStatus = status;
+                        _downloadProgress = download;
+                        _uploadProgress = upload;
+                        _currentDownloadSpeed = downloadSpeed;
+                        _currentUploadSpeed = uploadSpeed;
+                    }
+
+                    var preferredServerId = _settings?.DefaultServerId ?? 0;
+                    var usedFallback = false;
+                    SpeedTestResult? result;
+
+                    try
+                    {
+                        result = await SpeedTestCLI.Run(cliPath, ProcessCallback, ProgressCallback, _context!, preferredServerId);
+                    }
+                    catch (ServerUnavailableException) when (preferredServerId != 0 && !_userCancelled)
+                    {
+                        usedFallback = true;
+                        _currentStatus = "Preferred server unavailable, retrying with nearest server...";
+                        _downloadProgress = 0;
+                        _uploadProgress = 0;
+                        _currentDownloadSpeed = 0;
+                        _currentUploadSpeed = 0;
+
+                        result = await SpeedTestCLI.Run(cliPath, ProcessCallback, ProgressCallback, _context!, 0);
+                    }
+
+                    if (result != null)
+                        result.UsedFallbackServer = usedFallback;
 
                     _lastResult = result;
                     _lastTestTime = DateTime.Now;
@@ -417,6 +583,8 @@ namespace Flow.Launcher.Plugin.SpeedTest
     public class Settings {
         public List<HistoryEntry> History { get; set; } = new List<HistoryEntry>();
         public int MaxHistoryEntries { get; set; } = 20;
+        public int DefaultServerId { get; set; } = 0; // 0 = auto (nearest) server selection
+        public string DefaultServerName { get; set; } = "";
     }
 
     public class HistoryEntry

@@ -1,14 +1,26 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Flow.Launcher.Plugin.SpeedTest
 {
+    public class ServerUnavailableException : Exception
+    {
+        public int ServerId { get; }
+        public ServerUnavailableException(int serverId, string message) : base(message)
+        {
+            ServerId = serverId;
+        }
+    }
+
     public static class SpeedTestCLI
     {
         private const string CLI_VERSION = "1.2.0";
@@ -52,14 +64,19 @@ namespace Flow.Launcher.Plugin.SpeedTest
             string cliPath,
             Action<Process> processCallback,
             Action<string, double, double, double, double> onProgress,
-            PluginInitContext context)
+            PluginInitContext context,
+            int serverId = 0)
         {
+            var arguments = "--format=json --progress=yes --accept-license --accept-gdpr";
+            if (serverId > 0)
+                arguments += $" --server-id={serverId}";
+
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = cliPath,
-                    Arguments = "--format=json --progress=yes --accept-license --accept-gdpr",
+                    Arguments = arguments,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -127,6 +144,7 @@ namespace Flow.Launcher.Plugin.SpeedTest
                             DownloadLatency = json.Download?.Latency?.Iqm ?? 0,
                             UploadJitter = json.Upload?.Latency?.Jitter ?? 0,
                             UploadLatency = json.Upload?.Latency?.Iqm ?? 0,
+                            ServerId = json.Server?.Id ?? 0,
                             ServerName = json.Server?.Name ?? "Unknown",
                             ServerLocation = json.Server?.Location ?? "",
                             ISP = json.Isp ?? "",
@@ -142,7 +160,16 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 }
             };
 
-            process.Start();
+            try
+            {
+                process.Start();
+            }
+            catch (Exception ex)
+            {
+                context.API.LogException("SpeedTest", "Failed to start speedtest CLI process", ex);
+                throw new Exception("Could not start the speedtest CLI - it may be missing or blocked by antivirus", ex);
+            }
+
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             processCallback(process);
@@ -154,7 +181,18 @@ namespace Flow.Launcher.Plugin.SpeedTest
             {
                 var errorMsg = errorOutput.ToString();
                 context.API.LogException("SpeedTest", $"Process exited with code {process.ExitCode}", new Exception(errorMsg));
-                
+
+                if (serverId > 0 && (
+                        errorMsg.IndexOf("cannot find server id", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        errorMsg.IndexOf("not specified server id", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        errorMsg.IndexOf("server id in configuration", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        errorMsg.IndexOf("unable to connect to the specified server", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        errorMsg.IndexOf("no matching servers", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        errorMsg.IndexOf("invalid server", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    throw new ServerUnavailableException(serverId, $"Server {serverId} is unavailable");
+                }
+
                 if (errorMsg.Contains("Limit reached") || errorMsg.Contains("Too many requests"))
                 {
                     throw new Exception("Rate limit reached - wait a few minutes or change your IP");
@@ -167,12 +205,142 @@ namespace Flow.Launcher.Plugin.SpeedTest
                 {
                     throw new Exception("Cannot connect to Speedtest servers - check your connection");
                 }
+                else if (string.IsNullOrWhiteSpace(errorMsg))
+                {
+                    throw new Exception($"Test failed unexpectedly (exit code {process.ExitCode})");
+                }
                 
                 throw new Exception("Test failed - check your internet connection");
             }
 
+            if (result == null)
+            {
+                throw new Exception("Test completed without producing a result - please try again");
+            }
+
             return result;
         }
+
+        public static async Task<List<ServerListEntry>> GetServers(
+            string cliPath,
+            PluginInitContext context,
+            CancellationToken cancellationToken,
+            int timeoutSeconds = 20)
+        {
+            var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = cliPath,
+                    Arguments = "--servers --accept-license --accept-gdpr",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8
+                }
+            };
+
+            var stdout = new System.Text.StringBuilder();
+            var stderr = new System.Text.StringBuilder();
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data != null) stdout.AppendLine(e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                {
+                    stderr.AppendLine(e.Data);
+                    context.API.LogWarn("SpeedTest", $"servers stderr: {e.Data}");
+                }
+            };
+
+            try
+            {
+                process.Start();
+            }
+            catch (Exception ex)
+            {
+                context.API.LogException("SpeedTest", "Failed to start speedtest CLI process", ex);
+                throw new Exception("Could not start the speedtest CLI - it may be missing or blocked by antivirus", ex);
+            }
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+            try
+            {
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { try { process.Kill(); } catch { } }
+
+                if (cancellationToken.IsCancellationRequested)
+                    throw;
+
+                throw new Exception("Timed out fetching server list - check your internet connection");
+            }
+
+            if (process.ExitCode != 0)
+            {
+                var errorMsg = stderr.ToString();
+                context.API.LogException("SpeedTest", $"Server list process exited with code {process.ExitCode}", new Exception(errorMsg));
+
+                if (errorMsg.Contains("Limit reached") || errorMsg.Contains("Too many requests"))
+                    throw new Exception("Rate limit reached - wait a few minutes and try again");
+                if (errorMsg.Contains("Configuration"))
+                    throw new Exception("Cannot connect to Speedtest servers - check your connection");
+
+                throw new Exception("Failed to fetch server list");
+            }
+
+            var servers = ParseServerListOutput(stdout.ToString());
+
+            if (servers.Count == 0)
+                throw new Exception("No nearby servers were found");
+
+            return servers;
+        }
+
+        private static readonly Regex ServerLineRegex = new(@"^\s*(\d+)\s+(.+?)\s*$", RegexOptions.Compiled);
+        private static readonly Regex CollapseSpacesRegex = new(@"\s{2,}", RegexOptions.Compiled);
+
+        // Parses the human-readable table produced by `speedtest --servers`
+        internal static List<ServerListEntry> ParseServerListOutput(string output)
+        {
+            var results = new List<ServerListEntry>();
+            if (string.IsNullOrWhiteSpace(output))
+                return results;
+
+            foreach (var rawLine in output.Split('\n'))
+            {
+                var line = rawLine.TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                var match = ServerLineRegex.Match(line);
+                if (!match.Success) continue; // skips "Closest servers:", header row, "====" separator, etc.
+                if (!int.TryParse(match.Groups[1].Value, out var id) || id <= 0) continue;
+
+                var display = CollapseSpacesRegex.Replace(match.Groups[2].Value.Trim(), " — ");
+                if (string.IsNullOrWhiteSpace(display)) continue;
+
+                results.Add(new ServerListEntry { Id = id, Name = display });
+            }
+
+            return results;
+        }
+    }
+
+    public class ServerListEntry
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
     }
 
     public class SpeedTestResult
@@ -184,12 +352,14 @@ namespace Flow.Launcher.Plugin.SpeedTest
         public double DownloadLatency { get; set; }
         public double UploadJitter { get; set; }
         public double UploadLatency { get; set; }
+        public int ServerId { get; set; }
         public string ServerName { get; set; } = "";
         public string ServerLocation { get; set; } = "";
         public string ISP { get; set; } = "";
         public string ResultUrl { get; set; } = "";
         public string ExternalIP { get; set; } = "";
         public string InternalIP { get; set; } = "";
+        public bool UsedFallbackServer { get; set; }
     }
 
     public class SpeedTestJsonResponse
@@ -248,11 +418,34 @@ namespace Flow.Launcher.Plugin.SpeedTest
 
     public class ServerInfo
     {
+        [JsonPropertyName("id")]
+        [JsonConverter(typeof(FlexibleIntConverter))]
+        public int Id { get; set; }
+
         [JsonPropertyName("name")]
         public string? Name { get; set; }
 
         [JsonPropertyName("location")]
         public string? Location { get; set; }
+    }
+
+    /* Some speedtest CLI builds/versions emit numeric IDs as JSON numbers, others as strings.
+     This converter accepts either so a schema quirk can't blow up parsing of the whole result. */
+    public class FlexibleIntConverter : JsonConverter<int>
+    {
+        public override int Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var value))
+                return value;
+            if (reader.TokenType == JsonTokenType.String && int.TryParse(reader.GetString(), out var parsed))
+                return parsed;
+            return 0;
+        }
+
+        public override void Write(Utf8JsonWriter writer, int value, JsonSerializerOptions options)
+        {
+            writer.WriteNumberValue(value);
+        }
     }
 
     public class ResultInfo

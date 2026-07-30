@@ -1,2 +1,1 @@
-- Fixes #2
-- Improved build script
+- Added default server selection

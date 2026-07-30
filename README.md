@@ -26,6 +26,7 @@ Test your internet speed from Flow Launcher using the Ookla Speedtest CLI.
 - **`st start`** — Run a speed test
 - **`st history`** — View past test results
 - **`st ip`** — Show internal and external IP
+- **`st server`** — Pick default server
 
 ---
 
